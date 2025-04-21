@@ -6,7 +6,7 @@ from authorized_role_management import load_auth_roles, save_auth_roles
 
 # Global config variables
 authorized_roles = load_auth_roles()
-GUILD_ID = 1350725093914972172
+GUILD_ID = "GUILD ID HERE"
 
 # Bot Setup
 intents = discord.Intents.default()
@@ -40,18 +40,6 @@ async def load_extensions():
 async def main():
     async with bot:
         await load_extensions()
-        await bot.start(token="ENTER TOKEN HERE")
+        await bot.start(token="INSERT TOKEN HERE")
 if __name__ == "__main__":
     asyncio.run(main())
-
-### CONTEXT MENU COMMANDS ###
-#@app_commands.context_menu(
-#    name="Permaban Spammer/Raider",
-#    guild=GUILD_ID
-#)
-#async def permaban_spammer_raider(interaction: discord.Interaction, user: discord.Member) -> None:
-#    await interaction.response.send_message(f"Permabanning {user.mention}...", ephemeral=True)
-#    return
-
-#@bot.tree.context_menu(name="Mute User")
-#async def mute_user(interaction: discord.Interaction, user: discord.Member) -> None:

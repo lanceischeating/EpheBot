@@ -8,7 +8,7 @@ async def setup(bot: commands.Bot):
     await bot.add_cog(Config(bot))
 
 def is_admin_or_owner():
-    async def predicate(interaction: discord.Interaction) -> bool:
+    async def util_check(interaction: discord.Interaction):
         # Check if the user is the bot owner
         app_info = await interaction.client.application_info()
         if interaction.user.id == app_info.owner.id:
@@ -20,7 +20,7 @@ def is_admin_or_owner():
 
         return False
 
-    return commands.check(predicate)
+    return commands.check(util_check)
 
 
 class Config(commands.Cog):
@@ -90,3 +90,32 @@ class Config(commands.Cog):
             role_names.append(role.name if role else f"Unknown role (ID: {role_id})")
 
         await interaction.response.send_message(f"Authorized roles for this guild: {'\n '.join(role_names)}")
+
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(
+        name="caller_check",
+        description="Checks if the user is the bot owner or has the required role to use the command")
+    async def caller_check(self, interaction: discord.Interaction, ephemeral: bool = True) -> None:
+        guild_authorized_roles = authorized_roles.get(interaction.guild.id, [])
+        user_roles = [role.id for role in interaction.user.roles]
+        has_required_role = any(role_id in guild_authorized_roles for role_id in user_roles)
+
+        is_owner = interaction.user.id == interaction.guild.owner_id
+        is_admin = interaction.user.guild_permissions.administrator
+
+
+        embed = discord.Embed(title="User Info", color=0x00ff00)
+        embed.add_field(name="User", value=interaction.user.mention, inline=False)
+        embed.add_field(name="Join Date", value=str(interaction.user.joined_at), inline=False)
+        embed.add_field(name="Created At", value=str(interaction.user.created_at), inline=False)
+        embed.add_field(name="Server Owner?", value=is_owner, inline=False)
+        embed.add_field(name="Admin?", value=is_admin, inline=False)
+        embed.add_field(name="Has Moderation Role(s)?", value=has_required_role, inline=False)
+        embed.add_field(name="Roles", value="\n".join([role.mention for role in interaction.user.roles]), inline=False)
+
+        await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+
+
+
+
+

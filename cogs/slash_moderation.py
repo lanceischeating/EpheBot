@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import timedelta
+from time import strftime, gmtime
 from discord.ext.commands import bot
 from main import GUILD_ID, authorized_roles
 from authorized_role_management import load_auth_roles
@@ -15,17 +16,17 @@ class SlashModeration(commands.Cog):
         self.GUILD_ID = GUILD_ID
 
     @staticmethod
-    def is_authorized(self, interaction: discord.Interaction) -> bool:
+    def is_authorized(interaction: discord.Interaction) -> bool:
         guild_authorized_roles = authorized_roles.get(interaction.guild.id, [])
         is_owner: bool = interaction.user.id == interaction.guild.owner_id
         user_roles = [role.id for role in interaction.user.roles]
 
         has_required_role = any(role_id in guild_authorized_roles for role_id in user_roles)
 
-        return is_owner or self.admin_authorized(self, interaction) or has_required_role
+        return is_owner or SlashModeration.admin_authorized(interaction) or has_required_role
 
     @staticmethod
-    def admin_authorized(self, interaction: discord.Interaction) -> bool:
+    def admin_authorized(interaction: discord.Interaction) -> bool:
         return interaction.user.id == interaction.guild.owner_id or any(role.permissions.administrator for role in interaction.user.roles)
 
 
@@ -41,10 +42,14 @@ class SlashModeration(commands.Cog):
         ephemeral="Set whether the bot response is visible to other users TRUE or FALSE")
     async def add_role(self, interaction: discord.Interaction, target: discord.Member, role: discord.Role,
                     ephemeral: bool = False) -> None:
-        if SlashModeration.is_authorized(interaction) and interaction.user.id != target.id:
+        if SlashModeration.is_authorized(interaction):
+            if role.position >=interaction.guild.me.top_role.position:
+                await interaction.response.send_message(f"Not possible. The role {role.mention} is above my highest role.", ephemeral=True)
+                return
             try:
                 await target.add_roles(role)
                 await interaction.response.send_message(f"Added {role.mention} to {target.mention}", ephemeral=ephemeral)
+                print(f"[{strftime("%m-%d-%Y %H:%M:%S", gmtime())}] Added {role.name} to {target.name} ({target.id}) in {GUILD_ID}")
             except discord.Forbidden:
                 await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
             except discord.HTTPException as e:
@@ -66,21 +71,22 @@ class SlashModeration(commands.Cog):
         ephemeral="Set whether the bot response is visible to other users TRUE or FALSE")
     async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role,
                       ephemeral: bool = False) -> None:
-        if role not in user.roles:
-            await interaction.response.send_message(f"{user.mention} does not have the role {role.mention}", ephemeral=True)
-            return
 
         if SlashModeration.is_authorized(interaction):
+            if role.position >=interaction.guild.me.top_role.position:
+                await interaction.response.send_message(f"Not possible. The role {role.mention} is above my highest role.", ephemeral=True)
+                return
             try:
                 await user.remove_roles(role)
                 await interaction.response.send_message(f"Removed {role.mention} from {user.mention}", ephemeral=ephemeral)
+                print(f"[{strftime("%m-%d-%Y %H:%M:%S", gmtime())}] - Removed {role.name} from {user.name} ({user.id}) in {GUILD_ID}")
                 return
             except Exception as e:
                 await interaction.response.send_message(f"An error occurred while removing the role. Error code: {e}",
                                                     ephemeral=False)
         else:
-            await interaction.response.send_message(
-                f"You do not have the required role to use this command.", ephemeral=True)
+            await interaction.response.send_message(f"You do not have the required role to use this command.", ephemeral=True)
+            print(f"[{strftime("%m-%d-%Y %H:%M:%S", gmtime())}] - {interaction.user.name} tried to remove {role.name} from {user.name} ({user.id}) in {GUILD_ID} but was denied access")
 
 
 #purge_channel
@@ -121,6 +127,7 @@ class SlashModeration(commands.Cog):
                 await interaction.followup.send(
                     f"Deleted {len(deleted)} messages from {channel.mention} | Caller: {interaction.user.mention} | Reason: {reason}",
                     ephemeral=False)
+                print(f"Deleted {len(deleted)} messages from {channel.name} ({channel.id}) in {GUILD_ID}")
             except Exception as e:
                 await interaction.followup.send(f"An error occurred while purging the channel. Error code: {e}",
                                             ephemeral=False)
@@ -143,15 +150,25 @@ class SlashModeration(commands.Cog):
         if reason is None:
             reason = "No reason provided"
 
-        if SlashModeration.is_authorized(interaction) and target.id != interaction.user.id:
+        if interaction.user.id == target.id:
+            await interaction.response.send_message(f"You cannot remove the timeout from yourself!", ephemeral=ephemeral);
+            print(
+                f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to remove the timeout from themselves in {GUILD_ID}")
+            return
+
+        if SlashModeration.is_authorized(interaction):
             try:
                 await target.edit(timed_out_until=None, reason=reason)
                 await interaction.response.send_message(f"Removed timeout from {target.mention}", ephemeral=ephemeral)
+                await target.send(f"Your timeout has been removed early by {interaction.user.mention}. Reason: {reason}")
+                print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - Removed timeout from {target.name} ({target.id}) in {GUILD_ID}")
             except Exception as e:
                 await interaction.response.send_message(f"Something went wrong. Error code: {e}", ephemeral=ephemeral)
+                print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to remove the timeout from {target.name} ({target.id}) in {GUILD_ID} but failed.\n Error code: {e}")
         else:
             await interaction.response.send_message(
                 f"You do not have the required role to use this command.", ephemeral=True)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to remove the timeout from {target.name} ({target.id}) in {GUILD_ID} but was denied access")
 
 
 #timeout
@@ -175,64 +192,71 @@ class SlashModeration(commands.Cog):
     async def timeout(self, interaction: discord.Interaction, target: discord.Member, duration: int, duration_unit: str,
                   reason: str, ephemeral: bool = False) -> None:
         if not SlashModeration.is_authorized(interaction):
-            await interaction.response.send_message(
-            f"You do not have the required role to use this command", ephemeral=ephemeral)
+            await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
+            print(
+                f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to timeout {target.name} ({target.id}) in {GUILD_ID} but was denied access")
             return
-
+        input_exceeded_max_duration = False
         duration_in_seconds = None
         MAX_DURATION = 28
         match duration_unit:
             case "minutes":
                 if duration > 40320:
-                    await interaction.response.send_message(
-                        f"You cannot timeout for more than 40320 minutes, setting to maximum of 28 days",
-                    ephemeral=ephemeral)
                     duration_in_seconds = 40320 * 60
+                    input_exceeded_max_duration = True
                 else:
                     duration_in_seconds = duration * 60
             case "hours":
                 if duration > 672:
-                    await interaction.response.send_message(
-                    f"You cannot timeout for more than 672 hours, setting to maximum of 28 days", ephemeral=ephemeral)
                     duration_in_seconds = 672 * 60 * 60
+                    input_exceeded_max_duration = True
                 else:
                     duration_in_seconds = duration * 60 * 60
             case "days":
                 if duration > MAX_DURATION:
-                    await interaction.response.send_message(
-                    f"You cannot timeout for more than {MAX_DURATION} days, setting to maximum of 28 days",
-                    ephemeral=False)
                     duration_in_seconds = MAX_DURATION * 60 * 60 * 24
+                    input_exceeded_max_duration = True
                 else:
                     duration_in_seconds = duration * 60 * 60 * 24
             case "weeks":
                 if duration > 4:
-                    await interaction.response.send_message(
-                    f"You cannot timeout for more than 4 weeks, setting to maximum of 28 days", ephemeral=ephemeral)
                     duration_in_seconds = MAX_DURATION * 60 * 60 * 24 * 7
+                    input_exceeded_max_duration = True
                 else:
                     duration_in_seconds = duration * 60 * 60 * 24 * 7
 
-        if not SlashModeration.is_authorized(interaction):
-            await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
-            return
+
 
         if target.id == interaction.user.id:
             await interaction.response.send_message(f"You cannot timeout yourself", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to timeout themselves in {GUILD_ID}")
             return
 
         try:
             if target.timed_out_until is not None:
                 await interaction.response.send_message(f"{target.mention} is already timed out, consider removing "
                                                     f"the timeout first", ephemeral=ephemeral)
+                print(
+                    f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to timeout {target.name} ({target.id}) in {GUILD_ID} but was already timed out")
                 return
 
             timedout_until = discord.utils.utcnow() + timedelta(seconds=duration_in_seconds)
             await target.edit(timed_out_until=timedout_until, reason=reason)
-            await interaction.response.send_message(
-            f"Timed out {target.mention} for {timedelta(seconds=duration_in_seconds)}", ephemeral=ephemeral)
+
+            if not input_exceeded_max_duration:
+                await interaction.response.send_message(f"Timed out {target.mention} for {duration} {duration_unit}", ephemeral = ephemeral)
+                await target.send(f"You have been timed out by {interaction.user.mention} for {duration} {duration_unit}. Reason: {reason}")
+                print(f"Timed out {target.name} ({target.id}) in {GUILD_ID} for {duration} {duration_unit} | Caller: {interaction.user.name}")
+            else:
+                await interaction.response.send_message(f"Timed out {target.mention} for {MAX_DURATION} days. Discord API does not allow timeouts to exceed {MAX_DURATION}. "
+                                                        f"Consider using a /ban if you wish to apply a punishment longer than {MAX_DURATION}", ephemeral = ephemeral)
+                await target.send(f"You have been timed out by {interaction.user.mention} for {MAX_DURATION} days.")
+                print(f"Timed out {target.name} ({target.id}) in {GUILD_ID} for {MAX_DURATION} days. Discord API does not allow timeouts to exceed {MAX_DURATION}."
+                      f"\n Caller: {interaction.user.name} (ID:{interaction.user.id})")
         except Exception as e:
             await interaction.response.send_message(f"Something went wrong. Error code: {e}", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to timeout {target.name} ({target.id}) in {GUILD_ID} but failed."
+                  f"\n Error code: {e}")
 
 
 #internal fetch_timeout:
@@ -257,6 +281,9 @@ class SlashModeration(commands.Cog):
                 ephemeral: bool = False) -> None:
         if not SlashModeration.is_authorized(interaction):
             await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
+            print(
+                f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} (ID: {interaction.user.id}) "
+                f"tried to unban {target.name} ({target.id}) in {GUILD_ID} but was denied access")
             return
 
         if reason is None:
@@ -266,11 +293,16 @@ class SlashModeration(commands.Cog):
             await interaction.guild.fetch_ban(target)
             await interaction.guild.unban(target, reason=reason)
             await interaction.response.send_message(f"Unbanned {target.mention}", ephemeral=ephemeral)
+            print(f"Unbanned {target.name} ({target.id}) in {GUILD_ID} | Caller: {interaction.user.name}")
         except discord.NotFound as e:
-            await interaction.response.send_message(f"{target.mention} is not banned", ephemeral=False)
+            await interaction.response.send_message(f"{target.id} is not a valid userID", ephemeral=False)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S')}] - {interaction.user.name} tried to unban {target.name} ({target.id}) in {GUILD_ID} but {target.id} was not a valid ID"
+                  f"\n {e}")
             return
         except Exception as e:
             await interaction.response.send_message(f"Something went wrong. Error code: {e}", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to unban {target.name} ({target.id}) in {GUILD_ID} but failed."
+                  f"\n Error code: {e}")
             return
 
 
@@ -286,18 +318,24 @@ class SlashModeration(commands.Cog):
     async def kick(self, interaction: discord.Interaction, target: discord.Member, reason: str, ephemeral: bool = False) -> None:
         if not SlashModeration.is_authorized(interaction):
             await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but was denied access")
             return
 
         if target.id == interaction.user.id:
             await interaction.response.send_message(f"You cannot kick yourself!", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick themselves in {GUILD_ID}")
             return
-
+        if target.id not in interaction.guild.members:
+            await interaction.response.send_message(f"{target.mention} is not on the server.", ephemeral=True)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but they are not on the server")
+            return
         try:
             await interaction.guild.fetch_member(target.id)
-
             await target.kick(reason=reason)
             await interaction.response.send_message(f"Kicked {target.mention}", ephemeral=ephemeral)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - Kicked {target.name} ({target.id}) in {GUILD_ID} | Caller: {interaction.user.name}")
         except discord.NotFound:
-            await interaction.response.send_message(f"{target.mention} is not in the server", ephemeral=True)
+            await interaction.response.send_message(f"{target.mention} is not a valid ID", ephemeral=True)
+            print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but {target.id} was not a valid ID")
             return
 
