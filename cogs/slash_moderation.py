@@ -1,7 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from datetime import timedelta
+import datetime
 from time import strftime, gmtime
 from discord.ext.commands import bot
 from main import GUILD_ID, authorized_roles
@@ -57,7 +57,7 @@ class SlashModeration(commands.Cog):
                                                     ephemeral=True)
         else:
             await interaction.response.send_message(
-                f"You do not have the required role  to use this command.", ephemeral=True)
+                "You do not have the required role  to use this command.", ephemeral=True)
 
 
 #remove_role
@@ -225,10 +225,8 @@ class SlashModeration(commands.Cog):
                 else:
                     duration_in_seconds = duration * 60 * 60 * 24 * 7
 
-
-
         if target.id == interaction.user.id:
-            await interaction.response.send_message(f"You cannot timeout yourself", ephemeral=ephemeral)
+            await interaction.response.send_message("You cannot timeout yourself", ephemeral=ephemeral)
             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to timeout themselves in {GUILD_ID}")
             return
 
@@ -280,7 +278,7 @@ class SlashModeration(commands.Cog):
     async def unban(self, interaction: discord.Interaction, target: discord.User, reason: str = None,
                 ephemeral: bool = False) -> None:
         if not SlashModeration.is_authorized(interaction):
-            await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
+            await interaction.response.send_message("You are not authorized to use this command.", ephemeral=ephemeral)
             print(
                 f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} (ID: {interaction.user.id}) "
                 f"tried to unban {target.name} ({target.id}) in {GUILD_ID} but was denied access")
@@ -306,6 +304,61 @@ class SlashModeration(commands.Cog):
             return
 
 
+#ban
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(
+        name="ban",
+        description="IP Bans a user from your server and optionally deletes messages"
+    )
+    @app_commands.describe(
+        target="The user to be banned",
+        reason="The reason for banning the user",
+        delete_messages_time="Deletes messages upon banning the user",
+        ephemeral="Set whether the bot response and command execution is visible to other users"
+    )
+    @app_commands.choices(delete_messages_time=[
+        app_commands.Choice(name="No deletion", value=0),
+        app_commands.Choice(name="1 Day", value=1),
+        app_commands.Choice(name="3 day", value=3),
+        app_commands.Choice(name="7 days", value=7)
+    ])
+    async def ban(self, interaction: discord.Interaction, target: discord.User, reason: str, delete_messages_time: int, ephemeral: bool = False) -> None:
+        if not SlashModeration.is_authorized(interaction):
+            await interaction.response.send_message("You are not authorized to use this command.", ephemeral=True)
+            print(
+                f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} (ID: {interaction.user.id}) "
+                f"tried to ban {target.name} ({target.id}) in {GUILD_ID} but was denied access")
+            return
+        if reason is None:
+            reason = "No reason provided."
+
+        if interaction.user.id == target.id:
+            await interaction.response.send_message("you cannot ban yourself", ephemeral=True)
+            return
+
+        try:
+            await interaction.guild.fetch_ban(target)
+        except discord.NotFound:
+            ban_embed = discord.Embed(title="__User Banned__", color=discord.Color.red(), timestamp=datetime.datetime.now(datetime.UTC))
+            ban_embed.set_author(name=f"{target.name} | ID: {target.id}")
+            ban_embed.add_field(name="Mention", value=target.mention, inline=True)
+            ban_embed.add_field(name="Nickname", value=target.display_name, inline=True)
+
+            ban_authority_roles = [role for role in interaction.user.roles if role.permissions.ban_members]
+            ban_auth_string = "\n".join(role.mention for role in ban_authority_roles)
+
+            ban_embed.add_field(name="Invoker", value=interaction.user.mention, inline=True)
+            ban_embed.add_field(name="Authorized Role(s)", value=ban_auth_string, inline=False)
+            ban_embed.add_field(name="Administrator", value=SlashModeration.admin_authorized(interaction))
+            ban_embed.add_field(name="Ban Reason", value=reason, inline=False)
+            ban_embed.add_field(name="Deleted messages?", value=delete_messages_time)
+            await interaction.guild.ban(user=target, reason=reason, delete_message_days=delete_messages_time)
+            await interaction.response.send_message(embed=ban_embed)
+        else:
+            await interaction.response.send_message(f"{target.id} is already banned!")
+            return
+
+
 #kick
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(
@@ -317,12 +370,12 @@ class SlashModeration(commands.Cog):
         ephemeral="Set whether the bot response is visible to other users TRUE or FALSE")
     async def kick(self, interaction: discord.Interaction, target: discord.Member, reason: str, ephemeral: bool = False) -> None:
         if not SlashModeration.is_authorized(interaction):
-            await interaction.response.send_message(f"You are not authorized to use this command.", ephemeral=ephemeral)
+            await interaction.response.send_message("You are not authorized to use this command.", ephemeral=ephemeral)
             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but was denied access")
             return
 
         if target.id == interaction.user.id:
-            await interaction.response.send_message(f"You cannot kick yourself!", ephemeral=ephemeral)
+            await interaction.response.send_message("You cannot kick yourself!", ephemeral=ephemeral)
             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick themselves in {GUILD_ID}")
             return
         if target.id not in interaction.guild.members:
@@ -339,3 +392,33 @@ class SlashModeration(commands.Cog):
             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but {target.id} was not a valid ID")
             return
 
+#warn
+    @app_commands.guild(discord.Object(id=GUILD_ID))
+    @app_commands.command(
+        name="warn",
+        description="Sends a private message to this user indicating that they have been warned"
+    )
+    @app_commands.describe(
+        target="The person to warn",
+        reason="The reason for issuing the warning"
+    )
+    async def warn(self, interaction: discord.Interaction, target: discord.Member, reason: str, ephemeral: bool = False) -> None:
+        if not SlashModeration.is_authorized(interaction):
+             await interaction.response.send_message("You are not authorized to use this command.", ephemeral=ephemeral)
+             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to kick {target.name} ({target.id}) in {GUILD_ID} but was denied access")
+             return
+        if target.id == interaction.user.id:
+             await interaction.response.send_message("You cannot warn yourself")
+             print(f"[{strftime('%m-%d-%Y %H:%M:%S', gmtime())}] - {interaction.user.name} tried to warn  themselves in {GUILD_ID}")
+             return
+
+        if target.id not in interaction.guild.members:
+            await interaction.response.send_message("You cannot warn a user that is not in the server")
+            return
+
+        try:
+            await target.send(f"You have been warned in {interaction.guild.name} by {interaction.user.mention} for: {reason}")
+        except Exception as e:
+            await interaction.send_message(f"{target.mention} was warned by {interaction.user.mention}\n Reason:{reason}")
+            await interaction.followup(f"Direct message failed to send {e}")
+            
