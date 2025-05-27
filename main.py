@@ -3,9 +3,12 @@ import asyncio
 import discord
 from discord.ext import commands
 from authorized_role_management import load_auth_roles, save_auth_roles
+from authorized_usr_management import load_usr_roles, save_usr_auth_roles
 
 # Global config variables
 authorized_roles = load_auth_roles()
+usr_authorized_roles = load_usr_roles()
+
 GUILD_ID = "ENTER GUILD IT HERE"
 
 # Bot Setup
@@ -30,13 +33,16 @@ async def on_ready():
 async def on_guild_join(guild):
     if guild.id not in authorized_roles:
         authorized_roles[guild.id] = []
+        usr_authorized_roles[guild.id] = []
+
+        save_usr_auth_roles(authorized_roles)
         save_auth_roles(authorized_roles)
     print(f"Joined {guild.name} (ID: {guild.id}). A blank authorized roles entry was created.")
 
 async def load_extensions():
     await bot.load_extension("cogs.config")
     await bot.load_extension("cogs.slash_moderation")
-
+    await bot.load_extension("cogs.user_created_commands")
 async def main():
     async with bot:
         await load_extensions()
